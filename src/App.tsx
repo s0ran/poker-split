@@ -21,7 +21,6 @@ function calculateSplit(
   const divisor = diffs.reduce((sum, d) => sum + Math.abs(d), 0);
 
   if (divisor === 0) {
-    // Everyone has the same chips — split evenly
     const even = totalCost / players.length;
     return players.map((p) => ({ name: p.name, chips: p.chips, amount: even }));
   }
@@ -81,7 +80,6 @@ export default function App() {
     if (isNaN(target)) return;
 
     const res = calculateSplit(cost, parsed, target);
-    // Sort: payers first (descending), then receivers (ascending)
     res.sort((a, b) => b.amount - a.amount);
     setResults(res);
   };
@@ -95,7 +93,12 @@ export default function App() {
       <h1 className="text-2xl font-bold text-center mb-6">♠ Poker Split</h1>
 
       {results ? (
-        <ResultsView results={results} totalCost={parseFloat(totalCost)} onBack={handleReset} />
+        <ResultsView
+          results={results}
+          totalCost={parseFloat(totalCost)}
+          isAutoMode={targetMode === "auto"}
+          onBack={handleReset}
+        />
       ) : (
         <div className="space-y-5">
           {/* Total cost */}
@@ -208,10 +211,12 @@ export default function App() {
 function ResultsView({
   results,
   totalCost,
+  isAutoMode,
   onBack,
 }: {
   results: Result[];
   totalCost: number;
+  isAutoMode: boolean;
   onBack: () => void;
 }) {
   const payers = results.filter((r) => r.amount > 0.005);
@@ -220,81 +225,97 @@ function ResultsView({
     (r) => r.amount >= -0.005 && r.amount <= 0.005
   );
 
+  // 1位 (amount=0 or min) との差額 — Revolut 送金用
+  // 自動モードでは neutral (1位) が €0 なので、payer の amount がそのまま送金額
+  const topAmount = Math.min(...results.map((r) => r.amount));
+
   return (
     <div className="space-y-4">
       <div className="text-center text-gray-400 text-sm">
         ご飯代: <span className="text-white font-semibold">€{totalCost.toFixed(2)}</span>
       </div>
 
-      {/* Payers */}
+      {/* Payers — 負けた人 */}
       {payers.length > 0 && (
         <div>
           <h2 className="text-sm text-red-400 font-medium mb-2">💸 支払い</h2>
           <div className="space-y-1">
             {payers.map((r) => (
-              <div
-                key={r.name}
-                className="flex justify-between items-center bg-gray-800 rounded-lg px-4 py-3"
-              >
-                <div>
-                  <span className="font-medium">{r.name}</span>
-                  <span className="text-gray-500 text-sm ml-2">
-                    ({r.chips} chips)
+              <div key={r.name} className="bg-gray-800 rounded-lg px-4 py-3">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="font-medium">{r.name}</span>
+                    <span className="text-gray-500 text-sm ml-2">({r.chips})</span>
+                  </div>
+                  <span className="text-red-400 font-semibold">
+                    €{r.amount.toFixed(2)}
                   </span>
                 </div>
-                <span className="text-red-400 font-semibold">
-                  €{r.amount.toFixed(2)}
-                </span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Neutral */}
+      {/* Neutral — 基準 (1位) */}
       {neutral.length > 0 && (
         <div>
-          <h2 className="text-sm text-gray-400 font-medium mb-2">🏆 基準 (0 EUR)</h2>
+          <h2 className="text-sm text-gray-400 font-medium mb-2">🏆 基準 (€0.00)</h2>
           <div className="space-y-1">
             {neutral.map((r) => (
-              <div
-                key={r.name}
-                className="flex justify-between items-center bg-gray-800 rounded-lg px-4 py-3"
-              >
-                <div>
-                  <span className="font-medium">{r.name}</span>
-                  <span className="text-gray-500 text-sm ml-2">
-                    ({r.chips} chips)
-                  </span>
+              <div key={r.name} className="bg-gray-800 rounded-lg px-4 py-3">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="font-medium">{r.name}</span>
+                    <span className="text-gray-500 text-sm ml-2">({r.chips})</span>
+                  </div>
+                  <span className="text-gray-400">€0.00</span>
                 </div>
-                <span className="text-gray-400">€0.00</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Receivers */}
+      {/* Receivers — 勝った人 */}
       {receivers.length > 0 && (
         <div>
           <h2 className="text-sm text-green-400 font-medium mb-2">🎉 受け取り</h2>
           <div className="space-y-1">
             {receivers.map((r) => (
-              <div
-                key={r.name}
-                className="flex justify-between items-center bg-gray-800 rounded-lg px-4 py-3"
-              >
-                <div>
-                  <span className="font-medium">{r.name}</span>
-                  <span className="text-gray-500 text-sm ml-2">
-                    ({r.chips} chips)
+              <div key={r.name} className="bg-gray-800 rounded-lg px-4 py-3">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="font-medium">{r.name}</span>
+                    <span className="text-gray-500 text-sm ml-2">({r.chips})</span>
+                  </div>
+                  <span className="text-green-400 font-semibold">
+                    +€{Math.abs(r.amount).toFixed(2)}
                   </span>
                 </div>
-                <span className="text-green-400 font-semibold">
-                  -€{Math.abs(r.amount).toFixed(2)}
-                </span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Revolut 送金メモ — 自動モードのみ */}
+      {isAutoMode && (
+        <div className="border border-gray-700 rounded-lg p-4 mt-2">
+          <h2 className="text-sm text-gray-300 font-medium mb-2">📱 Revolut 送金メモ</h2>
+          <p className="text-xs text-gray-500 mb-2">1位とのチップ差:</p>
+          <div className="space-y-1">
+            {results.map((r) => {
+              const maxChips = Math.max(...results.map((x) => x.chips));
+              const chipDiff = maxChips - r.chips;
+              if (chipDiff === 0) return null;
+              return (
+                <div key={r.name} className="flex justify-between text-sm">
+                  <span className="text-gray-300">{r.name}</span>
+                  <span className="text-yellow-400 font-mono">-{chipDiff} chips</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

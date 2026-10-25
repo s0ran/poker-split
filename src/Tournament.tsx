@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { SettleGroup, Tag, eur, uid, virtualCost } from "./App";
 
 type Mode = "meal" | "entry";
@@ -42,13 +42,17 @@ export function linearMealPcts(n: number): string[] {
 }
 
 function parsePcts(values: string[], label: string, n: number): number[] | string {
-  const pcts = values.map((x) => parseFloat(x));
+  const pcts = values.slice(0, n).map((x) => parseFloat(x));
   if (pcts.some((x) => isNaN(x) || x < 0)) return `${label}を数字で入力してください。`;
   const sum = pcts.reduce((s, x) => s + x, 0);
   if (Math.abs(sum - 100) > 0.01) return `${label}の合計を100%にしてください (今は${Math.round(sum * 100) / 100}%)。`;
-  if (pcts.length > n) return `${label}の順位の数がプレイヤー数を超えています。`;
   return pcts;
 }
+
+// 順位ごとの割合の配列をプレイヤー数に合わせる (足りない分は0)
+const resize = (arr: string[], n: number) =>
+  arr.length >= n ? arr.slice(0, n) : [...arr, ...Array<string>(n - arr.length).fill("0")];
+const isLinear = (arr: string[]) => arr.join() === linearMealPcts(arr.length).join();
 
 const emptyPlayer = (): TPlayer => ({ id: uid(), name: "", rebuys: "0", skipMeal: false });
 
@@ -70,7 +74,7 @@ export default function Tournament() {
   const [mealCost, setMealCost] = useState("");
   const [rebuyFee, setRebuyFee] = useState("");
   const [entryFee, setEntryFee] = useState("");
-  const [payouts, setPayouts] = useState<string[]>(["50", "30", "20"]);
+  const [payouts, setPayouts] = useState<string[]>(() => resize(["50", "30", "20"], 5));
   const [mealPcts, setMealPcts] = useState<string[]>(() => linearMealPcts(5));
   const [players, setPlayers] = useState<TPlayer[]>(() => Array.from({ length: 5 }, emptyPlayer));
   const [results, setResults] = useState<{ rows: TResult[]; summary: TSummary } | null>(null);
@@ -79,12 +83,34 @@ export default function Tournament() {
   const updatePlayer = (id: string, patch: Partial<TPlayer>) =>
     setPlayers(players.map((p) => (p.id === id ? { ...p, ...patch } : p)));
 
-  // 1つ上 (dir=-1) / 下 (dir=1) と入れ替える
-  const move = (index: number, dir: -1 | 1) => {
-    const j = index + dir;
-    if (j < 0 || j >= players.length) return;
+  // プレイヤーの増減に合わせて順位表も伸び縮みさせる。飯代が順位比例のままなら新しい人数で入れ直す
+  const setPlayersSynced = (next: TPlayer[]) => {
+    setPlayers(next);
+    setPayouts(resize(payouts, next.length));
+    setMealPcts(isLinear(mealPcts) ? linearMealPcts(next.length) : resize(mealPcts, next.length));
+  };
+
+  // ドラッグで並べ替え: つまみを押したまま上下に動かすと、指の位置の行と入れ替わる (タッチ対応のため pointer events)
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const [dragId, setDragId] = useState<string | null>(null);
+
+  const onDragMove = (clientY: number) => {
+    if (!dragId) return;
+    const from = players.findIndex((p) => p.id === dragId);
+    let to = players.length - 1;
+    for (let i = 0; i < players.length; i++) {
+      const el = rowRefs.current.get(players[i]!.id);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) {
+        to = i;
+        break;
+      }
+    }
+    if (to === from) return;
     const next = [...players];
-    [next[index], next[j]] = [next[j]!, next[index]!];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved!);
     setPlayers(next);
   };
 
@@ -92,7 +118,7 @@ export default function Tournament() {
     setMealCost("127.63");
     setRebuyFee("10");
     setEntryFee("20");
-    setPayouts(["50", "30", "20"]);
+    setPayouts(resize(["50", "30", "20"], SAMPLE.length));
     setMealPcts(linearMealPcts(SAMPLE.length));
     setPlayers(
       SAMPLE.map(([name, rebuys, skipMeal]) => ({ id: uid(), name, rebuys: String(rebuys), skipMeal }))
@@ -204,31 +230,18 @@ export default function Tournament() {
         </div>
       </div>
 
-      {mode === "meal" && (
-        <PercentList
-          title="ご飯代の負担割合 (%)"
-          values={mealPcts}
-          onChange={setMealPcts}
-          action={
-            <button
-              className="text-gray-400 text-sm underline"
-              onClick={() => setMealPcts(linearMealPcts(players.filter((p) => p.name.trim()).length || players.length))}
-            >
-              順位比例で入力
-            </button>
-          }
-        />
-      )}
-
-      <PercentList
-        title={`賞金の配分割合 (%) — ${mode === "meal" ? "リバイプール" : "prize pool"}`}
-        values={payouts}
-        onChange={setPayouts}
+      <RankTable
+        mode={mode}
+        meal={mealPcts}
+        prize={payouts}
+        onMeal={setMealPcts}
+        onPrize={setPayouts}
+        onLinear={() => setMealPcts(linearMealPcts(players.length))}
       />
 
       <div>
         <label className="block text-sm text-gray-400 mb-2">プレイヤー ({players.length}人)</label>
-        <p className="text-xs text-gray-500 mb-2">上から1位、2位…の順。↑↓で並べ替え</p>
+        <p className="text-xs text-gray-500 mb-2">上から1位、2位…の順。左の ⠿ をドラッグで並べ替え</p>
         <div className="flex gap-2 text-xs text-gray-500 mb-1">
           <span className="w-14" />
           <span className="flex-1">名前</span>
@@ -236,27 +249,31 @@ export default function Tournament() {
         </div>
         <div className="space-y-2">
           {players.map((p, i) => (
-            <div key={p.id} className="flex gap-2 items-center">
+            <div
+              key={p.id}
+              ref={(el) => {
+                if (el) rowRefs.current.set(p.id, el);
+                else rowRefs.current.delete(p.id);
+              }}
+              className={`flex gap-2 items-center rounded-lg ${dragId === p.id ? "bg-gray-700/60 ring-1 ring-green-500" : ""}`}
+            >
               <div className="w-14 shrink-0 flex items-center gap-1">
-                <span className="text-gray-400 text-sm w-6 text-right">{i + 1}位</span>
-                <div className="flex flex-col">
-                  <button
-                    className="text-gray-400 text-xs leading-none px-1 py-0.5 disabled:opacity-20"
-                    aria-label={`${i + 1}位を上へ`}
-                    onClick={() => move(i, -1)}
-                    disabled={i === 0}
-                  >
-                    ▲
-                  </button>
-                  <button
-                    className="text-gray-400 text-xs leading-none px-1 py-0.5 disabled:opacity-20"
-                    aria-label={`${i + 1}位を下へ`}
-                    onClick={() => move(i, 1)}
-                    disabled={i === players.length - 1}
-                  >
-                    ▼
-                  </button>
-                </div>
+                <span
+                  className="text-gray-400 text-lg px-1 cursor-grab select-none"
+                  style={{ touchAction: "none" }}
+                  aria-label={`${i + 1}位をドラッグで移動`}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    setDragId(p.id);
+                  }}
+                  onPointerMove={(e) => onDragMove(e.clientY)}
+                  onPointerUp={() => setDragId(null)}
+                  onPointerCancel={() => setDragId(null)}
+                >
+                  ⠿
+                </span>
+                <span className="text-gray-400 text-sm">{i + 1}位</span>
               </div>
               <input
                 type="text"
@@ -295,7 +312,7 @@ export default function Tournament() {
               )}
               <button
                 className="text-gray-500 hover:text-red-400 text-lg px-1 disabled:opacity-30"
-                onClick={() => setPlayers(players.filter((x) => x.id !== p.id))}
+                onClick={() => setPlayersSynced(players.filter((x) => x.id !== p.id))}
                 disabled={players.length <= 2}
               >
                 ×
@@ -305,7 +322,7 @@ export default function Tournament() {
         </div>
         <button
           className="mt-2 w-full py-2 border border-dashed border-gray-600 rounded-lg text-gray-400 text-sm hover:border-gray-400"
-          onClick={() => setPlayers([...players, emptyPlayer()])}
+          onClick={() => setPlayersSynced([...players, emptyPlayer()])}
         >
           + プレイヤー追加
         </button>
@@ -327,50 +344,67 @@ export default function Tournament() {
   );
 }
 
-function PercentList({
-  title,
-  values,
-  onChange,
-  action,
+// 順位ごとの飯代負担 % と賞金配分 % を1つの表で入力する。行数はプレイヤー数と同じ
+function RankTable({
+  mode,
+  meal,
+  prize,
+  onMeal,
+  onPrize,
+  onLinear,
 }: {
-  title: string;
-  values: string[];
-  onChange: (v: string[]) => void;
-  action?: JSX.Element;
+  mode: Mode;
+  meal: string[];
+  prize: string[];
+  onMeal: (v: string[]) => void;
+  onPrize: (v: string[]) => void;
+  onLinear: () => void;
 }) {
+  const sum = (arr: string[]) => Math.round(arr.reduce((s, x) => s + (parseFloat(x) || 0), 0) * 100) / 100;
+  const set = (arr: string[], i: number, v: string) => arr.map((x, j) => (j === i ? v : x));
+  const cell =
+    "w-full min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none focus:border-green-500";
+  const showMeal = mode === "meal";
   return (
     <div>
       <div className="flex justify-between items-baseline mb-2">
-        <label className="text-sm text-gray-400">{title}</label>
-        {action}
+        <label className="text-sm text-gray-400">順位ごとの割合 (%)</label>
+        {showMeal && (
+          <button className="text-gray-400 text-sm underline" onClick={onLinear}>
+            飯代を順位比例に
+          </button>
+        )}
       </div>
-      <div className="space-y-2">
-        {values.map((v, i) => (
-          <div key={i} className="flex gap-2 items-center">
-            <span className="text-gray-500 text-sm w-10">{i + 1}位</span>
+      <div className="grid gap-2 items-center" style={{ gridTemplateColumns: showMeal ? "2.5rem 1fr 1fr" : "2.5rem 1fr" }}>
+        <span />
+        {showMeal && <span className="text-xs text-gray-500 text-right">飯代の負担</span>}
+        <span className="text-xs text-gray-500 text-right">{showMeal ? "リバイプール配分" : "prize pool配分"}</span>
+        {prize.map((_, i) => (
+          <Fragment key={i}>
+            <span className="text-gray-500 text-sm">{i + 1}位</span>
+            {showMeal && (
+              <input
+                type="number"
+                inputMode="decimal"
+                className={cell}
+                aria-label={`${i + 1}位の飯代負担`}
+                value={meal[i] ?? "0"}
+                onChange={(e) => onMeal(set(meal, i, e.target.value))}
+              />
+            )}
             <input
               type="number"
               inputMode="decimal"
-              className={inputCls}
-              aria-label={`${title} ${i + 1}位`}
-              value={v}
-              onChange={(e) => onChange(values.map((x, j) => (j === i ? e.target.value : x)))}
+              className={cell}
+              aria-label={`${i + 1}位の賞金配分`}
+              value={prize[i]}
+              onChange={(e) => onPrize(set(prize, i, e.target.value))}
             />
-            <button
-              className="text-gray-500 hover:text-red-400 text-lg px-1 disabled:opacity-30"
-              onClick={() => onChange(values.filter((_, j) => j !== i))}
-              disabled={values.length <= 1}
-            >
-              ×
-            </button>
-          </div>
+          </Fragment>
         ))}
-      </div>
-      <div className="flex justify-between items-center mt-2">
-        <button className="text-gray-400 text-sm" onClick={() => onChange([...values, "0"])}>
-          + 順位を追加
-        </button>
-        <span className="text-xs text-gray-500">合計 {Math.round(values.reduce((s, x) => s + (parseFloat(x) || 0), 0) * 100) / 100}%</span>
+        <span className="text-xs text-gray-500">合計</span>
+        {showMeal && <span className={`text-xs text-right ${sum(meal) === 100 ? "text-gray-500" : "text-red-400"}`}>{sum(meal)}%</span>}
+        <span className={`text-xs text-right ${sum(prize) === 100 ? "text-gray-500" : "text-red-400"}`}>{sum(prize)}%</span>
       </div>
     </div>
   );

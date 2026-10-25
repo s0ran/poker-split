@@ -16,35 +16,44 @@ interface RunState {
 const STRUCTURE_KEY = "ps-timer-structure";
 const RUN_KEY = "ps-timer-run";
 
-const BLINDS: [number, number][] = [
-  [25, 50],
-  [50, 100],
-  [75, 150],
-  [100, 200],
-  [150, 300],
-  [200, 400],
-  [300, 600],
-  [400, 800],
-  [500, 1000],
-  [600, 1200],
-  [800, 1600],
-  [1000, 2000],
+// スタック400 × 6人 (計2400) を想定。開始は 1/2 (BBアンティ2)、アンティは常に BB と同額
+const BLINDS_SHORT: [number, number][] = [
+  [1, 2],
+  [2, 4],
+  [3, 6],
+  [5, 10],
+  [8, 16],
+  [10, 20],
+  [15, 30],
+  [20, 40],
+];
+const BLINDS_LONG: [number, number][] = [
+  [1, 2],
+  [2, 4],
+  [3, 6],
+  [4, 8],
+  [5, 10],
+  [6, 12],
+  [8, 16],
+  [10, 20],
+  [15, 30],
+  [20, 40],
 ];
 
-// levels 段のレベル (各 min 分)、breakAfter のレベル番号の後に breakMin 分の休憩
-function makePreset(levels: number, min: number, breakAfter: number[], breakMin: number): Row[] {
+// 各レベル min 分、breakAfter のレベル番号の後に breakMin 分の休憩
+function makePreset(blinds: [number, number][], min: number, breakAfter: number[], breakMin: number): Row[] {
   const rows: Row[] = [];
-  BLINDS.slice(0, levels).forEach(([sb, bb], i) => {
-    rows.push({ id: uid(), kind: "level", sb: String(sb), bb: String(bb), ante: "0", min: String(min) });
+  blinds.forEach(([sb, bb], i) => {
+    rows.push({ id: uid(), kind: "level", sb: String(sb), bb: String(bb), ante: String(bb), min: String(min) });
     if (breakAfter.includes(i + 1)) rows.push({ id: uid(), kind: "break", min: String(breakMin) });
   });
   return rows;
 }
 
 const PRESETS: { key: string; label: string; make: () => Row[] }[] = [
-  { key: "90", label: "約1.5時間", make: () => makePreset(8, 10, [4], 5) },
-  { key: "120", label: "約2時間", make: () => makePreset(8, 14, [4], 8) },
-  { key: "180", label: "約3時間", make: () => makePreset(10, 17, [4, 8], 5) },
+  { key: "90", label: "約1.5時間", make: () => makePreset(BLINDS_SHORT, 10, [4], 5) },
+  { key: "120", label: "約2時間", make: () => makePreset(BLINDS_SHORT, 14, [4], 8) },
+  { key: "180", label: "約3時間", make: () => makePreset(BLINDS_LONG, 17, [4, 8], 5) },
 ];
 
 function load<T>(key: string): T | null {
@@ -394,9 +403,9 @@ function Structure({ rows, setRows, onStart }: { rows: Row[]; setRows: (r: Row[]
             className="text-gray-400"
             onClick={() => {
               const last = [...rows].reverse().find((r) => r.kind === "level");
-              const sb = last && last.kind === "level" ? (parseFloat(last.sb) || 0) * 2 : 25;
+              const sb = last && last.kind === "level" ? (parseFloat(last.sb) || 0) * 2 : 1;
               const min = last ? last.min : "15";
-              setRows([...rows, { id: uid(), kind: "level", sb: String(sb), bb: String(sb * 2), ante: "0", min }]);
+              setRows([...rows, { id: uid(), kind: "level", sb: String(sb), bb: String(sb * 2), ante: String(sb * 2), min }]);
             }}
           >
             + レベル

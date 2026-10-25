@@ -230,15 +230,6 @@ export default function Tournament() {
         </div>
       </div>
 
-      <RankTable
-        mode={mode}
-        meal={mealPcts}
-        prize={payouts}
-        onMeal={setMealPcts}
-        onPrize={setPayouts}
-        onLinear={() => setMealPcts(linearMealPcts(players.length))}
-      />
-
       <div>
         <label className="block text-sm text-gray-400 mb-2">プレイヤー ({players.length}人)</label>
         <p className="text-xs text-gray-500 mb-2">上から1位、2位…の順。左の ⠿ をドラッグで並べ替え</p>
@@ -327,6 +318,15 @@ export default function Tournament() {
           + プレイヤー追加
         </button>
       </div>
+
+      <RankTable
+        mode={mode}
+        meal={mealPcts}
+        prize={payouts}
+        onMeal={setMealPcts}
+        onPrize={setPayouts}
+        onLinear={() => setMealPcts(linearMealPcts(players.length))}
+      />
 
       <button
         className="w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg text-lg font-semibold transition-colors"

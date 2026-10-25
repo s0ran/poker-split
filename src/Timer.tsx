@@ -17,35 +17,10 @@ const STRUCTURE_KEY = "ps-timer-structure";
 const RUN_KEY = "ps-timer-run";
 
 // スタック400 × 6人 + リバイを想定。開始は 1/2 (BBアンティ2)、最後は 200/400 で決着させる。アンティは常に BB と同額
-const BLINDS_SHORT: [number, number][] = [
-  [1, 2],
-  [2, 4],
-  [3, 6],
-  [5, 10],
-  [10, 20],
-  [15, 30],
-  [25, 50],
-  [50, 100],
-  [100, 200],
-  [200, 400],
-];
-const BLINDS_LONG: [number, number][] = [
-  [1, 2],
-  [2, 4],
-  [3, 6],
-  [4, 8],
-  [5, 10],
-  [8, 16],
-  [10, 20],
-  [15, 30],
-  [25, 50],
-  [40, 80],
-  [60, 120],
-  [100, 200],
-  [200, 400],
-];
+// コースはレベル数とブラインドの上がり方だけを決め、1レベルの分数は全レベル一律 (基本15分)
+const DEFAULT_MIN = 15;
 
-// 各レベル min 分、breakAfter のレベル番号の後に breakMin 分の休憩
+// breakAfter のレベル番号の後に breakMin 分の休憩
 function makePreset(blinds: [number, number][], min: number, breakAfter: number[], breakMin: number): Row[] {
   const rows: Row[] = [];
   blinds.forEach(([sb, bb], i) => {
@@ -55,10 +30,28 @@ function makePreset(blinds: [number, number][], min: number, breakAfter: number[
   return rows;
 }
 
-const PRESETS: { key: string; label: string; make: () => Row[] }[] = [
-  { key: "90", label: "約1.5時間", make: () => makePreset(BLINDS_SHORT, 8, [4], 5) },
-  { key: "120", label: "約2時間", make: () => makePreset(BLINDS_SHORT, 11, [4], 8) },
-  { key: "180", label: "約3時間", make: () => makePreset(BLINDS_LONG, 13, [4, 8], 5) },
+const PRESETS: { key: string; label: string; make: (min: number) => Row[] }[] = [
+  {
+    key: "90",
+    label: "約1.5時間",
+    make: (min) => makePreset([[1, 2], [3, 6], [10, 20], [25, 50], [75, 150], [200, 400]], min, [], 0),
+  },
+  {
+    key: "120",
+    label: "約2時間",
+    make: (min) => makePreset([[1, 2], [2, 4], [5, 10], [10, 20], [25, 50], [50, 100], [100, 200], [200, 400]], min, [4], 5),
+  },
+  {
+    key: "180",
+    label: "約3時間",
+    make: (min) =>
+      makePreset(
+        [[1, 2], [2, 4], [3, 6], [5, 10], [10, 20], [15, 30], [25, 50], [50, 100], [75, 150], [100, 200], [200, 400]],
+        min,
+        [4, 8],
+        5
+      ),
+  },
 ];
 
 function load<T>(key: string): T | null {
@@ -105,7 +98,7 @@ function beep(ctx: AudioContext | null, freq: number, times: number) {
 }
 
 export default function Timer() {
-  const [rows, setRows] = useState<Row[]>(() => load<Row[]>(STRUCTURE_KEY) ?? PRESETS[1]!.make());
+  const [rows, setRows] = useState<Row[]>(() => load<Row[]>(STRUCTURE_KEY) ?? PRESETS[1]!.make(DEFAULT_MIN));
   const [run, setRun] = useState<RunState | null>(() => load<RunState>(RUN_KEY));
   const [now, setNow] = useState(() => Date.now());
   const audio = useRef<AudioContext | null>(null);
@@ -315,6 +308,11 @@ function Structure({ rows, setRows, onStart }: { rows: Row[]; setRows: (r: Row[]
     "w-full min-w-0 bg-gray-800 border border-gray-700 rounded-md px-1.5 py-1.5 text-sm text-right tabular-nums focus:outline-none focus:border-green-500";
   let levelNo = 0;
 
+  // 全レベルの分数が揃っていればその値、バラバラなら空欄
+  const levelMins = rows.filter((r) => r.kind === "level").map((r) => r.min);
+  const uniformMin = levelMins.length > 0 && levelMins.every((m) => m === levelMins[0]) ? levelMins[0]! : "";
+  const setUniformMin = (v: string) => setRows(rows.map((r) => (r.kind === "level" ? { ...r, min: v } : r)));
+
   return (
     <div className="space-y-5">
       <div>
@@ -324,13 +322,29 @@ function Structure({ rows, setRows, onStart }: { rows: Row[]; setRows: (r: Row[]
             <button
               key={p.key}
               className="flex-1 py-2 rounded-lg text-sm bg-gray-800 text-gray-300 border border-gray-700 active:bg-gray-700"
-              onClick={() => setRows(p.make())}
+              onClick={() => setRows(p.make(parseFloat(uniformMin) > 0 ? parseFloat(uniformMin) : DEFAULT_MIN))}
             >
               {p.label}
             </button>
           ))}
         </div>
         <p className="text-xs text-gray-500 mt-1">選ぶと下のストラクチャーが置き換わります。編集した内容はこの端末に保存されます。</p>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label htmlFor="uniform-min" className="text-sm text-gray-400">
+          1レベル
+        </label>
+        <input
+          id="uniform-min"
+          type="number"
+          inputMode="decimal"
+          className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-right tabular-nums focus:outline-none focus:border-green-500"
+          placeholder="個別"
+          value={uniformMin}
+          onChange={(e) => setUniformMin(e.target.value)}
+        />
+        <span className="text-sm text-gray-400">分 (全レベル一律)</span>
       </div>
 
       <div>

@@ -4,17 +4,37 @@ interface Player {
   id: string;
   name: string;
   chips: string;
+  skipMeal: boolean;
 }
 
 interface Result {
   name: string;
   chips: number;
   amount: number;
+  skipMeal: boolean;
+}
+
+interface CostBreakdown {
+  actual: number;
+  average: number;
+  eaters: number;
+  skippers: number;
+  virtual: number;
+}
+
+// ご飯を食べない人がいる場合: 実際のご飯代 ÷ 食べた人数 = 平均。
+// 計算用ご飯代 = 実際のご飯代 + 平均 × 食べない人数 (= 平均 × 全員)
+function virtualCost(actual: number, players: { skipMeal: boolean }[]): CostBreakdown | null {
+  const skippers = players.filter((p) => p.skipMeal).length;
+  const eaters = players.length - skippers;
+  if (eaters === 0) return null;
+  const average = actual / eaters;
+  return { actual, average, eaters, skippers, virtual: actual + average * skippers };
 }
 
 function calculateSplit(
   totalCost: number,
-  players: { name: string; chips: number }[],
+  players: { name: string; chips: number; skipMeal: boolean }[],
   target: number
 ): Result[] {
   const diffs = players.map((p) => target - p.chips);
@@ -22,13 +42,14 @@ function calculateSplit(
 
   if (divisor === 0) {
     const even = totalCost / players.length;
-    return players.map((p) => ({ name: p.name, chips: p.chips, amount: even }));
+    return players.map((p) => ({ name: p.name, chips: p.chips, amount: even, skipMeal: p.skipMeal }));
   }
 
   return players.map((p, i) => ({
     name: p.name,
     chips: p.chips,
     amount: (diffs[i]! / divisor) * totalCost,
+    skipMeal: p.skipMeal,
   }));
 }
 
@@ -39,20 +60,26 @@ function uid(): string {
 export default function App() {
   const [totalCost, setTotalCost] = useState("");
   const [players, setPlayers] = useState<Player[]>([
-    { id: uid(), name: "", chips: "" },
-    { id: uid(), name: "", chips: "" },
+    { id: uid(), name: "", chips: "", skipMeal: false },
+    { id: uid(), name: "", chips: "", skipMeal: false },
   ]);
   const [results, setResults] = useState<Result[] | null>(null);
+  const [breakdown, setBreakdown] = useState<CostBreakdown | null>(null);
+  const [error, setError] = useState("");
   const [targetMode, setTargetMode] = useState<"auto" | "manual">("auto");
   const [manualTarget, setManualTarget] = useState("");
 
   const addPlayer = () => {
-    setPlayers([...players, { id: uid(), name: "", chips: "" }]);
+    setPlayers([...players, { id: uid(), name: "", chips: "", skipMeal: false }]);
   };
 
   const removePlayer = (id: string) => {
     if (players.length <= 2) return;
     setPlayers(players.filter((p) => p.id !== id));
+  };
+
+  const toggleSkipMeal = (id: string) => {
+    setPlayers(players.map((p) => (p.id === id ? { ...p, skipMeal: !p.skipMeal } : p)));
   };
 
   const updatePlayer = (id: string, field: "name" | "chips", value: string) => {
@@ -62,25 +89,30 @@ export default function App() {
   };
 
   const handleCalculate = () => {
+    setError("");
     const cost = parseFloat(totalCost);
-    if (isNaN(cost) || cost <= 0) return;
+    if (isNaN(cost) || cost <= 0) return setError("ご飯代合計を入力してください。");
 
     const parsed = players
       .filter((p) => p.name.trim() && p.chips.trim())
-      .map((p) => ({ name: p.name.trim(), chips: parseFloat(p.chips) }))
+      .map((p) => ({ name: p.name.trim(), chips: parseFloat(p.chips), skipMeal: p.skipMeal }))
       .filter((p) => !isNaN(p.chips));
 
-    if (parsed.length < 2) return;
+    if (parsed.length < 2) return setError("名前とチップ数が入ったプレイヤーを2人以上入力してください。");
+
+    const bd = virtualCost(cost, parsed);
+    if (!bd) return setError("ご飯を食べた人が1人以上必要です。");
 
     const target =
       targetMode === "manual" && manualTarget.trim()
         ? parseFloat(manualTarget)
         : Math.max(...parsed.map((p) => p.chips));
 
-    if (isNaN(target)) return;
+    if (isNaN(target)) return setError("基準チップ数を数字で入力してください。");
 
-    const res = calculateSplit(cost, parsed, target);
+    const res = calculateSplit(bd.virtual, parsed, target);
     res.sort((a, b) => b.amount - a.amount);
+    setBreakdown(bd);
     setResults(res);
   };
 
@@ -92,10 +124,10 @@ export default function App() {
     <div className="max-w-md mx-auto px-4 py-6">
       <h1 className="text-2xl font-bold text-center mb-6">♠ Poker Split</h1>
 
-      {results ? (
+      {results && breakdown ? (
         <ResultsView
           results={results}
-          totalCost={parseFloat(totalCost)}
+          breakdown={breakdown}
           isAutoMode={targetMode === "auto"}
           onBack={handleReset}
         />
@@ -104,7 +136,7 @@ export default function App() {
           {/* Total cost */}
           <div>
             <label className="block text-sm text-gray-400 mb-1">
-              ご飯代合計 (EUR)
+              ご飯代合計 (EUR、実際に払った金額)
             </label>
             <input
               type="number"
@@ -178,6 +210,17 @@ export default function App() {
                     onChange={(e) => updatePlayer(p.id, "chips", e.target.value)}
                   />
                   <button
+                    className={`shrink-0 rounded-lg px-2 py-2 text-xs border ${
+                      p.skipMeal
+                        ? "bg-yellow-500/20 border-yellow-500 text-yellow-300"
+                        : "bg-gray-800 border-gray-700 text-gray-500"
+                    }`}
+                    aria-pressed={p.skipMeal}
+                    onClick={() => toggleSkipMeal(p.id)}
+                  >
+                    {p.skipMeal ? "食べない" : "食べた"}
+                  </button>
+                  <button
                     className="text-gray-500 hover:text-red-400 text-lg px-1"
                     onClick={() => removePlayer(p.id)}
                     disabled={players.length <= 2}
@@ -202,6 +245,7 @@ export default function App() {
           >
             計算する
           </button>
+          {error && <p className="text-red-400 text-sm">{error}</p>}
         </div>
       )}
     </div>
@@ -210,12 +254,12 @@ export default function App() {
 
 function ResultsView({
   results,
-  totalCost,
+  breakdown,
   isAutoMode,
   onBack,
 }: {
   results: Result[];
-  totalCost: number;
+  breakdown: CostBreakdown;
   isAutoMode: boolean;
   onBack: () => void;
 }) {
@@ -231,9 +275,29 @@ function ResultsView({
 
   return (
     <div className="space-y-4">
-      <div className="text-center text-gray-400 text-sm">
-        ご飯代: <span className="text-white font-semibold">€{totalCost.toFixed(2)}</span>
-      </div>
+      {breakdown.skippers > 0 ? (
+        <div className="bg-gray-800 rounded-lg px-4 py-3 text-sm space-y-1">
+          <div className="flex justify-between text-gray-400">
+            <span>実際のご飯代</span><span>€{breakdown.actual.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between text-gray-400">
+            <span>1人あたり平均 (食べた{breakdown.eaters}人)</span>
+            <span>€{breakdown.average.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between text-gray-400">
+            <span>+ 平均 × 食べない{breakdown.skippers}人</span>
+            <span>€{(breakdown.average * breakdown.skippers).toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between border-t border-gray-700 pt-1">
+            <span className="text-gray-300">計算用ご飯代</span>
+            <span className="text-white font-semibold">€{breakdown.virtual.toFixed(2)}</span>
+          </div>
+        </div>
+      ) : (
+        <div className="text-center text-gray-400 text-sm">
+          ご飯代: <span className="text-white font-semibold">€{breakdown.actual.toFixed(2)}</span>
+        </div>
+      )}
 
       {/* Payers — 負けた人 */}
       {payers.length > 0 && (
@@ -246,6 +310,7 @@ function ResultsView({
                   <div>
                     <span className="font-medium">{r.name}</span>
                     <span className="text-gray-500 text-sm ml-2">({r.chips})</span>
+                    {r.skipMeal && <span className="text-yellow-400 text-xs ml-2">食べない</span>}
                   </div>
                   <span className="text-red-400 font-semibold">
                     €{r.amount.toFixed(2)}
@@ -268,6 +333,7 @@ function ResultsView({
                   <div>
                     <span className="font-medium">{r.name}</span>
                     <span className="text-gray-500 text-sm ml-2">({r.chips})</span>
+                    {r.skipMeal && <span className="text-yellow-400 text-xs ml-2">食べない</span>}
                   </div>
                   <span className="text-gray-400">€0.00</span>
                 </div>
@@ -288,6 +354,7 @@ function ResultsView({
                   <div>
                     <span className="font-medium">{r.name}</span>
                     <span className="text-gray-500 text-sm ml-2">({r.chips})</span>
+                    {r.skipMeal && <span className="text-yellow-400 text-xs ml-2">食べない</span>}
                   </div>
                   <span className="text-green-400 font-semibold">
                     +€{Math.abs(r.amount).toFixed(2)}

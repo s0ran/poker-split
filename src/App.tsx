@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Tournament from "./Tournament";
 
 interface Player {
   id: string;
@@ -15,7 +16,7 @@ interface Result {
   skipMeal: boolean;
 }
 
-interface CostBreakdown {
+export interface CostBreakdown {
   actual: number;
   average: number;
   eaters: number;
@@ -40,7 +41,7 @@ function calculateSplit(
 }
 
 // 金参加がいる場合: 平均 = 実際のご飯代 ÷ 飯参加人数、計算用ご飯代 = 実際 + 平均 × 金参加人数
-function virtualCost(actual: number, players: { skipMeal: boolean }[]): CostBreakdown | null {
+export function virtualCost(actual: number, players: { skipMeal: boolean }[]): CostBreakdown | null {
   const skippers = players.filter((p) => p.skipMeal).length;
   const eaters = players.length - skippers;
   if (eaters === 0) return null;
@@ -48,12 +49,12 @@ function virtualCost(actual: number, players: { skipMeal: boolean }[]): CostBrea
   return { actual, average, eaters, skippers, virtual: actual + average * skippers };
 }
 
-function uid(): string {
+export function uid(): string {
   return Math.random().toString(36).slice(2, 9);
 }
 
 const emptyPlayer = (): Player => ({ id: uid(), name: "", chips: "", skipMeal: false });
-const eur = (n: number) => "€" + n.toFixed(2);
+export const eur = (n: number) => "€" + n.toFixed(2);
 
 // テスト用: 請求・受け取り・精算なし・金参加の全パターンが出るデータ
 const SAMPLE: [string, number, boolean][] = [
@@ -66,6 +67,33 @@ const SAMPLE: [string, number, boolean][] = [
 ];
 
 export default function App() {
+  const [tab, setTab] = useState<"cash" | "tournament">("cash");
+  return (
+    <div className="max-w-md mx-auto px-4 py-6">
+      <h1 className="text-2xl font-bold text-center mb-4">♠ Poker Split</h1>
+      <div className="flex gap-1 mb-6 bg-gray-800 rounded-lg p-1">
+        {(
+          [
+            ["cash", "キャッシュ"],
+            ["tournament", "トーナメント"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            className={`flex-1 py-2 rounded-md text-sm ${tab === key ? "bg-gray-600 text-white" : "text-gray-400"}`}
+            aria-pressed={tab === key}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "cash" ? <CashSplit /> : <Tournament />}
+    </div>
+  );
+}
+
+function CashSplit() {
   const [totalCost, setTotalCost] = useState("");
   const [players, setPlayers] = useState<Player[]>(() => Array.from({ length: 5 }, emptyPlayer));
   const [results, setResults] = useState<Result[] | null>(null);
@@ -113,9 +141,7 @@ export default function App() {
   };
 
   return (
-    <div className="max-w-md mx-auto px-4 py-6">
-      <h1 className="text-2xl font-bold text-center mb-6">♠ Poker Split</h1>
-
+    <div>
       {results && breakdown ? (
         <ResultsView results={results} breakdown={breakdown} onBack={() => setResults(null)} />
       ) : (
@@ -208,7 +234,7 @@ export default function App() {
   );
 }
 
-function Tag() {
+export function Tag() {
   return <span className="text-yellow-400 text-xs ml-2">金</span>;
 }
 
@@ -385,7 +411,7 @@ function NetLine({ net, average }: { net: number; average: number }) {
   );
 }
 
-function SettleGroup({
+export function SettleGroup({
   title,
   total,
   cls,

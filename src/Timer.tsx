@@ -16,16 +16,17 @@ interface RunState {
 const STRUCTURE_KEY = "ps-timer-structure";
 const RUN_KEY = "ps-timer-run";
 
-// スタック400 × 6人 (計2400) を想定。開始は 1/2 (BBアンティ2)、アンティは常に BB と同額
+// スタック400 × 6人 + リバイを想定。開始は 1/2 (BBアンティ2)、最後は 100/200 で決着させる。アンティは常に BB と同額
 const BLINDS_SHORT: [number, number][] = [
   [1, 2],
   [2, 4],
   [3, 6],
   [5, 10],
-  [8, 16],
   [10, 20],
   [15, 30],
-  [20, 40],
+  [25, 50],
+  [50, 100],
+  [100, 200],
 ];
 const BLINDS_LONG: [number, number][] = [
   [1, 2],
@@ -33,11 +34,13 @@ const BLINDS_LONG: [number, number][] = [
   [3, 6],
   [4, 8],
   [5, 10],
-  [6, 12],
   [8, 16],
   [10, 20],
   [15, 30],
-  [20, 40],
+  [25, 50],
+  [40, 80],
+  [60, 120],
+  [100, 200],
 ];
 
 // 各レベル min 分、breakAfter のレベル番号の後に breakMin 分の休憩
@@ -51,9 +54,9 @@ function makePreset(blinds: [number, number][], min: number, breakAfter: number[
 }
 
 const PRESETS: { key: string; label: string; make: () => Row[] }[] = [
-  { key: "90", label: "約1.5時間", make: () => makePreset(BLINDS_SHORT, 10, [4], 5) },
-  { key: "120", label: "約2時間", make: () => makePreset(BLINDS_SHORT, 14, [4], 8) },
-  { key: "180", label: "約3時間", make: () => makePreset(BLINDS_LONG, 17, [4, 8], 5) },
+  { key: "90", label: "約1.5時間", make: () => makePreset(BLINDS_SHORT, 9, [4], 5) },
+  { key: "120", label: "約2時間", make: () => makePreset(BLINDS_SHORT, 12, [4], 8) },
+  { key: "180", label: "約3時間", make: () => makePreset(BLINDS_LONG, 14, [4, 8], 5) },
 ];
 
 function load<T>(key: string): T | null {

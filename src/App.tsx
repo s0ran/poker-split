@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Tournament from "./Tournament";
+import Timer from "./Timer";
 
 interface Player {
   id: string;
@@ -67,7 +68,7 @@ const SAMPLE: [string, number, boolean][] = [
 ];
 
 export default function App() {
-  const [tab, setTab] = useState<"cash" | "tournament">("cash");
+  const [tab, setTab] = useState<"cash" | "tournament" | "timer">("cash");
   return (
     <div className="max-w-md mx-auto px-4 py-6">
       <h1 className="text-2xl font-bold text-center mb-4">♠ Poker Split</h1>
@@ -76,6 +77,7 @@ export default function App() {
           [
             ["cash", "キャッシュ"],
             ["tournament", "トーナメント"],
+            ["timer", "タイマー"],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -88,7 +90,7 @@ export default function App() {
           </button>
         ))}
       </div>
-      {tab === "cash" ? <CashSplit /> : <Tournament />}
+      {tab === "cash" ? <CashSplit /> : tab === "tournament" ? <Tournament /> : <Timer />}
     </div>
   );
 }

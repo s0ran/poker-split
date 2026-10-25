@@ -232,12 +232,7 @@ export default function Tournament() {
 
       <div>
         <label className="block text-sm text-gray-400 mb-2">プレイヤー ({players.length}人)</label>
-        <p className="text-xs text-gray-500 mb-2">上から1位、2位…の順。左の ⠿ をドラッグで並べ替え</p>
-        <div className="flex gap-2 text-xs text-gray-500 mb-1">
-          <span className="w-14" />
-          <span className="flex-1">名前</span>
-          <span className="w-14 text-center">リバイ</span>
-        </div>
+        <p className="text-xs text-gray-500 mb-2">上から1位、2位…の順。左の ⠿ をドラッグで並べ替え。± でリバイ回数</p>
         <div className="space-y-2">
           {players.map((p, i) => (
             <div
@@ -273,14 +268,26 @@ export default function Tournament() {
                 value={p.name}
                 onChange={(e) => updatePlayer(p.id, { name: e.target.value })}
               />
-              <input
-                type="number"
-                inputMode="numeric"
-                className="w-14 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:border-green-500"
-                aria-label="リバイ回数"
-                value={p.rebuys}
-                onChange={(e) => updatePlayer(p.id, { rebuys: e.target.value })}
-              />
+              <div className="flex shrink-0 items-center rounded-lg border border-gray-700 bg-gray-800 text-sm">
+                <button
+                  className="px-2 py-2 text-gray-400 disabled:opacity-30"
+                  aria-label={`${p.name || `${i + 1}位`}のリバイを1回減らす`}
+                  onClick={() => updatePlayer(p.id, { rebuys: String(Math.max(0, (parseInt(p.rebuys, 10) || 0) - 1)) })}
+                  disabled={(parseInt(p.rebuys, 10) || 0) <= 0}
+                >
+                  −
+                </button>
+                <span className={`w-7 text-center tabular-nums ${(parseInt(p.rebuys, 10) || 0) > 0 ? "text-white" : "text-gray-500"}`}>
+                  {parseInt(p.rebuys, 10) || 0}回
+                </span>
+                <button
+                  className="px-2 py-2 text-gray-400"
+                  aria-label={`${p.name || `${i + 1}位`}のリバイを1回増やす`}
+                  onClick={() => updatePlayer(p.id, { rebuys: String((parseInt(p.rebuys, 10) || 0) + 1) })}
+                >
+                  +
+                </button>
+              </div>
               {mode === "meal" && (
                 <>
                   <div className="flex shrink-0 rounded-lg border border-gray-700 overflow-hidden text-xs">

@@ -6,7 +6,6 @@ type Mode = "meal" | "entry";
 interface TPlayer {
   id: string;
   name: string;
-  rank: string;
   rebuys: string;
   /** true = 金参加 (ポーカーのみ) */
   skipMeal: boolean;
@@ -32,23 +31,35 @@ interface TSummary {
   skippers: number;
 }
 
-// 飯代を順位で分ける: diff = 順位 - 1 (1位は0)、amount = diff / Σdiff × ご飯代
-export function rankSplit(cost: number, ranks: number[]): number[] {
-  const diffs = ranks.map((r) => r - 1);
-  const divisor = diffs.reduce((s, d) => s + d, 0);
-  if (divisor === 0) return ranks.map(() => cost / ranks.length);
-  return diffs.map((d) => (d / divisor) * cost);
+// 順位比例の飯代負担割合 (%): 1位は0、(順位 - 1) に比例。合計がちょうど100になるよう最後で調整
+export function linearMealPcts(n: number): string[] {
+  const divisor = (n * (n - 1)) / 2;
+  if (n < 2) return ["100"];
+  const pcts = Array.from({ length: n }, (_, i) => Math.round((i / divisor) * 10000) / 100);
+  const rest = pcts.slice(0, -1).reduce((s, x) => s + x, 0);
+  pcts[n - 1] = Math.round((100 - rest) * 100) / 100;
+  return pcts.map(String);
 }
 
-const emptyPlayer = (rank: number): TPlayer => ({ id: uid(), name: "", rank: String(rank), rebuys: "0", skipMeal: false });
+function parsePcts(values: string[], label: string, n: number): number[] | string {
+  const pcts = values.map((x) => parseFloat(x));
+  if (pcts.some((x) => isNaN(x) || x < 0)) return `${label}を数字で入力してください。`;
+  const sum = pcts.reduce((s, x) => s + x, 0);
+  if (Math.abs(sum - 100) > 0.01) return `${label}の合計を100%にしてください (今は${Math.round(sum * 100) / 100}%)。`;
+  if (pcts.length > n) return `${label}の順位の数がプレイヤー数を超えています。`;
+  return pcts;
+}
 
-const SAMPLE: [string, number, number, boolean][] = [
-  ["Aki", 1, 0, false],
-  ["Ben", 2, 1, false],
-  ["Chie", 3, 2, false],
-  ["Dan", 4, 0, true],
-  ["Emi", 5, 1, false],
-  ["Fumi", 6, 3, false],
+const emptyPlayer = (): TPlayer => ({ id: uid(), name: "", rebuys: "0", skipMeal: false });
+
+// 並び順 = 順位
+const SAMPLE: [string, number, boolean][] = [
+  ["Aki", 0, false],
+  ["Ben", 1, false],
+  ["Chie", 2, false],
+  ["Dan", 0, true],
+  ["Emi", 1, false],
+  ["Fumi", 3, false],
 ];
 
 const inputCls =
@@ -60,76 +71,88 @@ export default function Tournament() {
   const [rebuyFee, setRebuyFee] = useState("");
   const [entryFee, setEntryFee] = useState("");
   const [payouts, setPayouts] = useState<string[]>(["50", "30", "20"]);
-  const [players, setPlayers] = useState<TPlayer[]>(() => Array.from({ length: 5 }, (_, i) => emptyPlayer(i + 1)));
+  const [mealPcts, setMealPcts] = useState<string[]>(() => linearMealPcts(5));
+  const [players, setPlayers] = useState<TPlayer[]>(() => Array.from({ length: 5 }, emptyPlayer));
   const [results, setResults] = useState<{ rows: TResult[]; summary: TSummary } | null>(null);
   const [error, setError] = useState("");
 
   const updatePlayer = (id: string, patch: Partial<TPlayer>) =>
     setPlayers(players.map((p) => (p.id === id ? { ...p, ...patch } : p)));
 
+  // 1つ上 (dir=-1) / 下 (dir=1) と入れ替える
+  const move = (index: number, dir: -1 | 1) => {
+    const j = index + dir;
+    if (j < 0 || j >= players.length) return;
+    const next = [...players];
+    [next[index], next[j]] = [next[j]!, next[index]!];
+    setPlayers(next);
+  };
+
   const fillSample = () => {
     setMealCost("127.63");
     setRebuyFee("10");
     setEntryFee("20");
     setPayouts(["50", "30", "20"]);
+    setMealPcts(linearMealPcts(SAMPLE.length));
     setPlayers(
-      SAMPLE.map(([name, rank, rebuys, skipMeal]) => ({ id: uid(), name, rank: String(rank), rebuys: String(rebuys), skipMeal }))
+      SAMPLE.map(([name, rebuys, skipMeal]) => ({ id: uid(), name, rebuys: String(rebuys), skipMeal }))
     );
     setError("");
   };
 
   const handleCalculate = () => {
     setError("");
+    // 名前が入った人だけを並び順で数えて順位にする
     const parsed = players
       .filter((p) => p.name.trim())
-      .map((p) => ({
+      .map((p, i) => ({
         name: p.name.trim(),
-        rank: parseInt(p.rank, 10),
-        rebuys: mode === "meal" ? parseInt(p.rebuys || "0", 10) : 0,
+        rank: i + 1,
+        rebuys: parseInt(p.rebuys || "0", 10),
         skipMeal: mode === "meal" && p.skipMeal,
       }));
     const n = parsed.length;
     if (n < 2) return setError("名前が入ったプレイヤーを2人以上入力してください。");
-    const ranks = parsed.map((p) => p.rank);
-    if (ranks.some((r) => isNaN(r) || r < 1 || r > n) || new Set(ranks).size !== n)
-      return setError(`順位は1〜${n}を重複なしで入力してください。`);
     if (parsed.some((p) => isNaN(p.rebuys) || p.rebuys < 0)) return setError("リバイ回数は0以上の整数で入力してください。");
 
-    const pcts = payouts.map((x) => parseFloat(x));
-    if (pcts.some((x) => isNaN(x) || x < 0)) return setError("配分割合を数字で入力してください。");
-    const pctSum = pcts.reduce((s, x) => s + x, 0);
-    if (Math.abs(pctSum - 100) > 0.001) return setError(`配分割合の合計を100%にしてください (今は${pctSum}%)。`);
-    if (pcts.length > n) return setError("配分する順位の数がプレイヤー数を超えています。");
+    const pcts = parsePcts(payouts, "賞金の配分割合", n);
+    if (typeof pcts === "string") return setError(pcts);
     const prizeShare = (rank: number) => (rank <= pcts.length ? pcts[rank - 1]! / 100 : 0);
 
     let rows: TResult[];
     let summary: TSummary;
 
+    const fee = parseFloat(rebuyFee || "0");
+    if (isNaN(fee) || fee < 0) return setError("リバイ額を数字で入力してください。");
+    const rebuyTotal = fee * parsed.reduce((s, p) => s + p.rebuys, 0);
+
     if (mode === "meal") {
       const cost = parseFloat(mealCost);
       if (isNaN(cost) || cost < 0) return setError("ご飯代合計を入力してください (なしなら0)。");
-      const fee = parseFloat(rebuyFee || "0");
-      if (isNaN(fee) || fee < 0) return setError("リバイ額を数字で入力してください。");
 
+      const mp = parsePcts(mealPcts, "ご飯代の負担割合", n);
+      if (typeof mp === "string") return setError(mp);
       const bd = virtualCost(cost, parsed);
       if (!bd) return setError("飯参加の人が1人以上必要です。");
-      const shares = rankSplit(bd.virtual, ranks);
-      const pool = fee * parsed.reduce((s, p) => s + p.rebuys, 0);
+      const pool = rebuyTotal;
 
-      rows = parsed.map((p, i) => {
-        const meal = p.skipMeal ? shares[i]! - bd.average : shares[i]!;
+      rows = parsed.map((p) => {
+        const share = p.rank <= mp.length ? (mp[p.rank - 1]! / 100) * bd.virtual : 0;
+        const meal = p.skipMeal ? share - bd.average : share;
         const paidIn = p.rebuys * fee;
         const prize = prizeShare(p.rank) * pool;
         return { ...p, meal, paidIn, prize, net: meal + paidIn - prize };
       });
       summary = { mode, pool, mealActual: cost, mealVirtual: bd.virtual, average: bd.average, skippers: bd.skippers };
     } else {
-      const fee = parseFloat(entryFee);
-      if (isNaN(fee) || fee <= 0) return setError("参加費を入力してください。");
-      const pool = fee * n;
+      // prize pool = 参加費 × 人数 + リバイ額 × リバイ総数
+      const entry = parseFloat(entryFee);
+      if (isNaN(entry) || entry <= 0) return setError("参加費を入力してください。");
+      const pool = entry * n + rebuyTotal;
       rows = parsed.map((p) => {
+        const paidIn = entry + p.rebuys * fee;
         const prize = prizeShare(p.rank) * pool;
-        return { ...p, meal: 0, paidIn: fee, prize, net: fee - prize };
+        return { ...p, meal: 0, paidIn, prize, net: paidIn - prize };
       });
       summary = { mode, pool, mealActual: 0, mealVirtual: 0, average: 0, skippers: 0 };
     }
@@ -163,77 +186,78 @@ export default function Tournament() {
         ))}
       </div>
 
-      {mode === "meal" ? (
-        <div className="flex gap-2">
+      <div className="flex gap-2">
+        {mode === "meal" ? (
           <div className="flex-1 min-w-0">
             <label className="block text-sm text-gray-400 mb-1">ご飯代合計 (EUR)</label>
             <input type="number" inputMode="decimal" className={inputCls} placeholder="127.63" value={mealCost} onChange={(e) => setMealCost(e.target.value)} />
           </div>
+        ) : (
           <div className="flex-1 min-w-0">
-            <label className="block text-sm text-gray-400 mb-1">リバイ1回 (EUR)</label>
-            <input type="number" inputMode="decimal" className={inputCls} placeholder="10" value={rebuyFee} onChange={(e) => setRebuyFee(e.target.value)} />
+            <label className="block text-sm text-gray-400 mb-1">参加費 (EUR / 人)</label>
+            <input type="number" inputMode="decimal" className={inputCls} placeholder="20" value={entryFee} onChange={(e) => setEntryFee(e.target.value)} />
           </div>
-        </div>
-      ) : (
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">参加費 (EUR / 人)</label>
-          <input type="number" inputMode="decimal" className={inputCls} placeholder="20" value={entryFee} onChange={(e) => setEntryFee(e.target.value)} />
-        </div>
-      )}
-
-      <div>
-        <label className="block text-sm text-gray-400 mb-2">
-          配分割合 (%) — {mode === "meal" ? "リバイプール" : "prize pool"}
-        </label>
-        <div className="space-y-2">
-          {payouts.map((v, i) => (
-            <div key={i} className="flex gap-2 items-center">
-              <span className="text-gray-500 text-sm w-10">{i + 1}位</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                className={inputCls}
-                value={v}
-                onChange={(e) => setPayouts(payouts.map((x, j) => (j === i ? e.target.value : x)))}
-              />
-              <button
-                className="text-gray-500 hover:text-red-400 text-lg px-1 disabled:opacity-30"
-                onClick={() => setPayouts(payouts.filter((_, j) => j !== i))}
-                disabled={payouts.length <= 1}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="flex justify-between items-center mt-2">
-          <button className="text-gray-400 text-sm" onClick={() => setPayouts([...payouts, "0"])}>
-            + 順位を追加
-          </button>
-          <span className="text-xs text-gray-500">
-            合計 {payouts.reduce((s, x) => s + (parseFloat(x) || 0), 0)}%
-          </span>
+        )}
+        <div className="flex-1 min-w-0">
+          <label className="block text-sm text-gray-400 mb-1">リバイ1回 (EUR)</label>
+          <input type="number" inputMode="decimal" className={inputCls} placeholder="10" value={rebuyFee} onChange={(e) => setRebuyFee(e.target.value)} />
         </div>
       </div>
 
+      {mode === "meal" && (
+        <PercentList
+          title="ご飯代の負担割合 (%)"
+          values={mealPcts}
+          onChange={setMealPcts}
+          action={
+            <button
+              className="text-gray-400 text-sm underline"
+              onClick={() => setMealPcts(linearMealPcts(players.filter((p) => p.name.trim()).length || players.length))}
+            >
+              順位比例で入力
+            </button>
+          }
+        />
+      )}
+
+      <PercentList
+        title={`賞金の配分割合 (%) — ${mode === "meal" ? "リバイプール" : "prize pool"}`}
+        values={payouts}
+        onChange={setPayouts}
+      />
+
       <div>
         <label className="block text-sm text-gray-400 mb-2">プレイヤー ({players.length}人)</label>
-        <div className="flex gap-2 text-xs text-gray-500 mb-1 pl-1">
-          <span className="w-12">順位</span>
+        <p className="text-xs text-gray-500 mb-2">上から1位、2位…の順。↑↓で並べ替え</p>
+        <div className="flex gap-2 text-xs text-gray-500 mb-1">
+          <span className="w-14" />
           <span className="flex-1">名前</span>
-          {mode === "meal" && <span className="w-14 text-center">リバイ</span>}
+          <span className="w-14 text-center">リバイ</span>
         </div>
         <div className="space-y-2">
-          {players.map((p) => (
+          {players.map((p, i) => (
             <div key={p.id} className="flex gap-2 items-center">
-              <input
-                type="number"
-                inputMode="numeric"
-                className="w-12 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:border-green-500"
-                aria-label="順位"
-                value={p.rank}
-                onChange={(e) => updatePlayer(p.id, { rank: e.target.value })}
-              />
+              <div className="w-14 shrink-0 flex items-center gap-1">
+                <span className="text-gray-400 text-sm w-6 text-right">{i + 1}位</span>
+                <div className="flex flex-col">
+                  <button
+                    className="text-gray-400 text-xs leading-none px-1 py-0.5 disabled:opacity-20"
+                    aria-label={`${i + 1}位を上へ`}
+                    onClick={() => move(i, -1)}
+                    disabled={i === 0}
+                  >
+                    ▲
+                  </button>
+                  <button
+                    className="text-gray-400 text-xs leading-none px-1 py-0.5 disabled:opacity-20"
+                    aria-label={`${i + 1}位を下へ`}
+                    onClick={() => move(i, 1)}
+                    disabled={i === players.length - 1}
+                  >
+                    ▼
+                  </button>
+                </div>
+              </div>
               <input
                 type="text"
                 className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500"
@@ -241,16 +265,16 @@ export default function Tournament() {
                 value={p.name}
                 onChange={(e) => updatePlayer(p.id, { name: e.target.value })}
               />
+              <input
+                type="number"
+                inputMode="numeric"
+                className="w-14 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:border-green-500"
+                aria-label="リバイ回数"
+                value={p.rebuys}
+                onChange={(e) => updatePlayer(p.id, { rebuys: e.target.value })}
+              />
               {mode === "meal" && (
                 <>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    className="w-14 bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:border-green-500"
-                    aria-label="リバイ回数"
-                    value={p.rebuys}
-                    onChange={(e) => updatePlayer(p.id, { rebuys: e.target.value })}
-                  />
                   <div className="flex shrink-0 rounded-lg border border-gray-700 overflow-hidden text-xs">
                     <button
                       className={`px-2 py-2 ${!p.skipMeal ? "bg-green-600 text-white" : "bg-gray-800 text-gray-500"}`}
@@ -281,7 +305,7 @@ export default function Tournament() {
         </div>
         <button
           className="mt-2 w-full py-2 border border-dashed border-gray-600 rounded-lg text-gray-400 text-sm hover:border-gray-400"
-          onClick={() => setPlayers([...players, emptyPlayer(players.length + 1)])}
+          onClick={() => setPlayers([...players, emptyPlayer()])}
         >
           + プレイヤー追加
         </button>
@@ -298,6 +322,55 @@ export default function Tournament() {
         <button className="text-gray-500 text-sm underline" onClick={fillSample}>
           サンプルを入力
         </button>
+      </div>
+    </div>
+  );
+}
+
+function PercentList({
+  title,
+  values,
+  onChange,
+  action,
+}: {
+  title: string;
+  values: string[];
+  onChange: (v: string[]) => void;
+  action?: JSX.Element;
+}) {
+  return (
+    <div>
+      <div className="flex justify-between items-baseline mb-2">
+        <label className="text-sm text-gray-400">{title}</label>
+        {action}
+      </div>
+      <div className="space-y-2">
+        {values.map((v, i) => (
+          <div key={i} className="flex gap-2 items-center">
+            <span className="text-gray-500 text-sm w-10">{i + 1}位</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              className={inputCls}
+              aria-label={`${title} ${i + 1}位`}
+              value={v}
+              onChange={(e) => onChange(values.map((x, j) => (j === i ? e.target.value : x)))}
+            />
+            <button
+              className="text-gray-500 hover:text-red-400 text-lg px-1 disabled:opacity-30"
+              onClick={() => onChange(values.filter((_, j) => j !== i))}
+              disabled={values.length <= 1}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between items-center mt-2">
+        <button className="text-gray-400 text-sm" onClick={() => onChange([...values, "0"])}>
+          + 順位を追加
+        </button>
+        <span className="text-xs text-gray-500">合計 {Math.round(values.reduce((s, x) => s + (parseFloat(x) || 0), 0) * 100) / 100}%</span>
       </div>
     </div>
   );
@@ -379,7 +452,9 @@ function TournamentResults({ rows, summary: s, onBack }: { rows: TResult[]; summ
                   </span>
                 </>
               ) : (
-                <span>参加費 {eur(r.paidIn)}</span>
+                <span>
+                  参加費{r.rebuys > 0 ? ` + リバイ${r.rebuys}回` : ""} {eur(r.paidIn)}
+                </span>
               )}
               {r.prize > 0 && <span className="text-green-400">賞金 +{eur(r.prize)}</span>}
             </div>
